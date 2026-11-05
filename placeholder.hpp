@@ -321,6 +321,8 @@ PLACEHOLDER_TAG2(bxor_assign, ^=)
 PLACEHOLDER_TAG2(shl_assign, <<=)
 PLACEHOLDER_TAG2(shr_assign, >>=)
 
+PLACEHOLDER_TAG2(arrowstar, ->*)
+
 PLACEHOLDER_TAG1(neg, -)
 PLACEHOLDER_TAG1(pos, +)
 PLACEHOLDER_TAG1(lnot, !)
@@ -416,10 +418,10 @@ struct _call {
 
     template <class... Args>
     auto operator()(Args &&... args)
-        -> decltype(_apply_tuple(_eval<F &, Args...>::get(f, args...), a,
-                                 _index_seq_t<sizeof...(A)>())) {
-        return _apply_tuple(_eval<F &, Args...>::get(f, args...), a,
-                            _index_seq_t<sizeof...(A)>());
+        -> decltype(static_cast<const _call &>(*this)(
+            std::forward<Args>(args)...)) {
+        return static_cast<const _call &>(*this)(
+            std::forward<Args>(args)...);
     }
 
     template <class... Args>
@@ -428,6 +430,12 @@ struct _call {
                                  _index_seq_t<sizeof...(A)>())) {
         return _apply_tuple(_eval<const F &, Args...>::get(f, args...), a,
                             _index_seq_t<sizeof...(A)>());
+    }
+
+    template <class T,
+              class = typename std::enable_if<_bindable<T>::value>::type>
+    _binary<_call, _d<T>, _op_subscript> operator[](T &&t) const {
+        return {*this, std::forward<T>(t)};
     }
 };
 
@@ -592,10 +600,10 @@ struct _binary {
 
     template <class... Args>
     auto operator()(Args &&... args)
-        -> decltype(Op::apply(_eval<L &, Args...>::get(l, args...),
-                              _eval<R &, Args...>::get(r, args...))) {
-        return Op::apply(_eval<L &, Args...>::get(l, args...),
-                         _eval<R &, Args...>::get(r, args...));
+        -> decltype(static_cast<const _binary &>(*this)(
+            std::forward<Args>(args)...)) {
+        return static_cast<const _binary &>(*this)(
+            std::forward<Args>(args)...);
     }
 
     template <class... Args>
@@ -620,6 +628,87 @@ struct _binary {
 };
 
 /**
+ * @brief Short-circuiting logical-and node.
+ *
+ * @c _op_land is specialized so the right operand is evaluated only when the
+ * left operand converts to @c true. This is the one place where the node
+ * cannot use @c Op::apply, because that would evaluate both sides.
+ *
+ * @tparam L Left operand type.
+ * @tparam R Right operand type.
+ */
+template <class L, class R>
+struct _binary<L, R, _op_land> {
+    using _placeholder_expr = void;
+
+    L l;
+    R r;
+
+    _binary(L l_, R r_)
+        : l(static_cast<L &&>(l_)), r(static_cast<R &&>(r_)) {}
+
+    template <class... Args>
+    bool operator()(Args &&... args) const {
+        if (!static_cast<bool>(_eval<const L &, Args...>::get(l, args...))) {
+            return false;
+        }
+        return static_cast<bool>(_eval<const R &, Args...>::get(r, args...));
+    }
+
+    template <class... Args>
+    bool operator()(Args &&... args) {
+        return static_cast<const _binary &>(*this)(
+            std::forward<Args>(args)...);
+    }
+
+    template <class T,
+              class = typename std::enable_if<_bindable<T>::value>::type>
+    _binary<_binary, _d<T>, _op_subscript> operator[](T &&t) const {
+        return {*this, std::forward<T>(t)};
+    }
+};
+
+/**
+ * @brief Short-circuiting logical-or node.
+ *
+ * The right operand is evaluated only when the left operand converts to
+ * @c false.
+ *
+ * @tparam L Left operand type.
+ * @tparam R Right operand type.
+ */
+template <class L, class R>
+struct _binary<L, R, _op_lor> {
+    using _placeholder_expr = void;
+
+    L l;
+    R r;
+
+    _binary(L l_, R r_)
+        : l(static_cast<L &&>(l_)), r(static_cast<R &&>(r_)) {}
+
+    template <class... Args>
+    bool operator()(Args &&... args) const {
+        if (static_cast<bool>(_eval<const L &, Args...>::get(l, args...))) {
+            return true;
+        }
+        return static_cast<bool>(_eval<const R &, Args...>::get(r, args...));
+    }
+
+    template <class... Args>
+    bool operator()(Args &&... args) {
+        return static_cast<const _binary &>(*this)(
+            std::forward<Args>(args)...);
+    }
+
+    template <class T,
+              class = typename std::enable_if<_bindable<T>::value>::type>
+    _binary<_binary, _d<T>, _op_subscript> operator[](T &&t) const {
+        return {*this, std::forward<T>(t)};
+    }
+};
+
+/**
  * @brief Unary expression node.
  * @tparam X Operand type.
  * @tparam Op Operator tag.
@@ -634,14 +723,22 @@ struct _unary {
 
     template <class... Args>
     auto operator()(Args &&... args)
-        -> decltype(Op::apply(_eval<X &, Args...>::get(x, args...))) {
-        return Op::apply(_eval<X &, Args...>::get(x, args...));
+        -> decltype(static_cast<const _unary &>(*this)(
+            std::forward<Args>(args)...)) {
+        return static_cast<const _unary &>(*this)(
+            std::forward<Args>(args)...);
     }
 
     template <class... Args>
     auto operator()(Args &&... args) const
         -> decltype(Op::apply(_eval<const X &, Args...>::get(x, args...))) {
         return Op::apply(_eval<const X &, Args...>::get(x, args...));
+    }
+
+    template <class T,
+              class = typename std::enable_if<_bindable<T>::value>::type>
+    _binary<_unary, _d<T>, _op_subscript> operator[](T &&t) const {
+        return {*this, std::forward<T>(t)};
     }
 };
 
@@ -709,6 +806,7 @@ PLACEHOLDER_BINOP(bor, |)
 PLACEHOLDER_BINOP(bxor, ^)
 PLACEHOLDER_BINOP(shl, <<)
 PLACEHOLDER_BINOP(shr, >>)
+PLACEHOLDER_BINOP(arrowstar, ->*)
 
 PLACEHOLDER_UNOP(neg, -)
 PLACEHOLDER_UNOP(pos, +)

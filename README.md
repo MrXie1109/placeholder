@@ -60,6 +60,22 @@ int main() {
 }
 ```
 
+## Compared with lambdas
+
+For a pure expression the placeholder form is shorter: no parameter list, no
+return type, no body.
+
+| Operation | Lambda | placeholder.hpp |
+| --- | --- | --- |
+| increment | `[](int x) { return x + 1; }` | `arg1 + 1` |
+| addition | `[](int a, int b) { return a + b; }` | `arg1 + arg2` |
+| range check | `[](int x) { return x > 0 && x < 10; }` | `(arg1 > 0) && (arg1 < 10)` |
+| dereference and index | `[](int **p) { return (*p)[0]; }` | `(*arg1)[0]` |
+| member access | `[](Point *p) { return p->x; }` | `arg1->*&Point::x` |
+
+Placeholders are at their best when the operation is a single expression. Use a
+lambda when you need statements, local variables, or control flow.
+
 ## Placeholders
 
 | Object  | Argument index |
@@ -80,7 +96,7 @@ node is called.
 
 ### Binary
 
-`+` `-` `*` `/` `%` `==` `!=` `<` `<=` `>` `>=` `&&` `||` `&` `|` `^` `<<` `>>`
+`+` `-` `*` `/` `%` `==` `!=` `<` `<=` `>` `>=` `&&` `||` `&` `|` `^` `<<` `>>` `->*`
 
 Both operand orders are supported:
 
@@ -113,11 +129,45 @@ These must be members in C++, so they are provided by the placeholder itself:
 (arg1 <<= 1)(x);       // x <<= 1
 ```
 
+### Short-circuit
+
+`&&` and `||` are not evaluated through `Op::apply`. Dedicated nodes evaluate
+the left operand first and touch the right operand only when needed:
+
+```cpp
+int calls = 0;
+auto side = [&](int v) { ++calls; return v; };
+auto land = arg1 && arg2(0);
+
+land(false, side);   // false, calls == 0
+land(true, side);    // false, calls == 1
+```
+
 ### Subscript
 
 ```cpp
 (arg1[0])(v);          // v[0]
 ((arg1 + 1)[0])(p);    // p[1]
+```
+
+Subscript also applies to derived nodes:
+
+```cpp
+((*arg1)[0])(pp);      // (*pp)[0]
+(arg1(42)[0])(make);   // make(42)[0]
+```
+
+### Member pointer
+
+`.*` cannot be overloaded in C++; use `->*` with a member pointer:
+
+```cpp
+struct Point { int x; };
+int Point::*px = &Point::x;
+Point p{42};
+
+(arg1->*px)(&p);       // 42
+((arg1->*px) + 1)(&p); // 43
 ```
 
 ### Function call
@@ -162,7 +212,8 @@ g(1, 2);                // 3
 
 ## Limitations
 
-- `&&` and `||` are overloaded and therefore do **not** short-circuit.
+- `&&` and `||` short-circuit; each operand must be convertible to `bool`.
+- `.*` cannot be overloaded; only `->*` is supported for member pointers.
 - Arguments are passed as lvalues; rvalue-only use inside an expression is not
   supported.
 - Stored operands and call arguments are kept by value after decay.
@@ -191,5 +242,5 @@ templates, variadic templates, `std::tuple`, `std::enable_if` and
 ## Files
 
 - `placeholder.hpp` — the library, all declarations in `namespace placeholder`
-- `demo/` — 20 runnable examples, one per topic
+- `demo/` — 23 runnable examples, one per topic
 - `README.md`, `README.zh.md` — documentation
